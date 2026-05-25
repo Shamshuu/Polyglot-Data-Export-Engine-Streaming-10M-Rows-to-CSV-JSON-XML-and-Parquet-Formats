@@ -12,7 +12,7 @@ services:
       - DATABASE_USER=${DATABASE_USER}
       - DATABASE_PASSWORD=${DATABASE_PASSWORD}
       - PORT=8080
-    # Set
+    # Se
     mem_limit: 256m
 
   db:
