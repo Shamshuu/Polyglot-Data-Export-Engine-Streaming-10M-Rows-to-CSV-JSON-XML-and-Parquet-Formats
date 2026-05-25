@@ -1,0 +1,81 @@
+1. What This Project Does & Its Purpose
+
+The Polyglot Data Export Engine is a high-performance web service that extracts a dataset of exactly 10,000,000 records from a database and exports it to four formats: CSV, JSON, XML, and Apache Parquet.
+
+The Problem: 
+In typical web applications, exporting large datasets is done by fetching all records into memory, serializing them into an array/object, and sending them to the client. For 10 million rows, this requires gigabytes of RAM and causes the server to crash due to Out-Of-Memory (OOM) errors.
+
+The Solution: 
+This project implements end-to-end streaming. At no point does the application hold more than 10,000 rows in memory. It queries the database in small batches and serializes/flushes the data directly to the client's HTTP socket on-the-fly, adhering to a strict 256MB container memory cap.
+
+2. How the Technology Stack Helps
+
+Java 21 & Spring Boot: 
+Provides a robust framework for REST endpoints and handles high-performance I/O. We use Spring's StreamingResponseBody to write data directly to the client's HTTP response socket. Java's HikariCP connection pool ensures fast, reusable connections to the database.
+
+PostgreSQL 13: 
+Stores our records and handles JSONB columns (for nested metadata). PostgreSQL supports cursors, which allow the JDBC driver to query the database and fetch records in chunks rather than reading the entire 10 million row table at once.
+
+Docker & Docker Compose (docker-compose.yml):
+Enforces a strict physical memory limit of 256MB (mem_limit: 256m) on the application, proving the memory efficiency of the engine. It also manages database startup health checks and launches the database seeding process.
+
+Apache Parquet & Hadoop Common (pom.xml): 
+Provides the standard Java writer (ExampleParquetWriter) for the Apache Parquet format. Parquet is a columnar storage format (used in big data analytics) that groups data by columns rather than rows, providing massive file compression and extremely fast read operations.
+
+3. How Each Functionality is Implemented
+
+A. Database Seeding (init-db.sh)
+When the database container starts up, this script runs:
+
+It checks if the database already has 10 million rows. If it does, it skips seeding (idempotent).
+If not, it recreates the records table as UNLOGGED (disabling Write-Ahead-Logging). This bypasses disk-write overhead and speeds up inserts.
+It generates 10 million rows of mock data (including nested objects inside the JSONB metadata column) in a single batch insert using a SQL generate_series() function.
+Once rows are inserted, it creates the B-Tree primary key index (which is faster to build after insertion than during it).
+It alters the table back to LOGGED and links the auto-increment ID sequence.
+
+B. API Request Validation & Security (ExportController.java)
+
+SQL Injection Prevention: Since clients select custom columns dynamically, we cannot use standard SQL parameters for column names. Instead, we validate all source columns against a strict whitelist: id, created_at, name, value, metadata. If any unauthorized column is requested, the endpoint returns a 400 Bad Request.
+Tag Injection Prevention: For target column names (which become XML tags), we validate them against the regex ^[a-zA-Z_][a-zA-Z0-9_]*$ to ensure they represent valid XML tags and prevent format corruption.
+
+C. Database Cursor Streaming (ExportService.java)
+To stream rows from the database:
+
+We set the JDBC Connection Auto-Commit to false (conn.setAutoCommit(false)), which is required by PostgreSQL to keep cursors open.
+We configure the fetch size (statement.setFetchSize(10000)). This instructs JDBC to hold a server-side cursor and retrieve rows from PostgreSQL in batches of 10,000, ensuring constant, low memory usage.
+
+D. Format Serialization (ExportService.java)CSV: 
+
+Writes headers, fetches database rows in chunks, escapes commas, double quotes, and newlines in each cell, serializes the JSONB metadata to a flat JSON string, and writes line-by-line to the output stream.
+
+JSON: 
+Streams an array of objects [ {...}, {...} ]. It writes the opening bracket [, iterates through rows writing comma-separated JSON objects, and writes ]. It streams PostgreSQL's JSONB string directly into the output channel without parsing it, keeping memory footprint near zero.
+
+XML: 
+Output is generated recursively. For standard columns, it writes XML tags (e.g. <name>val</name>). For the metadata JSONB column, it parses the JSON string into a tree model and recursively walks the fields, generating nested XML elements (e.g., <metadata><sku>SKU-1</sku><details><weight>1.5</weight></details></metadata>).
+
+Parquet: 
+Parquet requires writing a file footer at the end (specifying byte offsets of row groups and metadata), which means it cannot be written directly to a non-seekable socket.
+To write Parquet, we stream database rows and write them to a temporary file on the container's disk.
+
+Low Memory Configuration: 
+We configure the Parquet writer with a custom row group size of 1MB (default is 128MB) and a page size of 64KB. This forces the writer to flush column data to disk frequently, preventing heap memory from growing.
+Once written, the file is streamed to the client in 64KB blocks and immediately deleted.
+
+E. On-The-Fly GZIP Compression (ExportController.java)
+
+If compression: 
+"gzip" is requested (only supported for text-based formats like CSV, JSON, and XML), the engine wraps the HTTP response output stream inside a standard GZIPOutputStream on-the-fly, compression is executed in memory blocks as data is serialized, and the header Content-Encoding: gzip is sent to the client.
+
+F. Performance Benchmarking (ExportService.java)
+
+The GET /exports/benchmark endpoint runs exports for all 4 formats.
+
+Peak Memory Measurement: 
+Before starting a format benchmark, it triggers garbage collection and resets the JVM's memory pools. During serialization, it tracks memory consumption using MemoryPoolMXBean (aggregating heap and non-heap pools) to record the exact peak memory.
+
+Duration: 
+Measured in seconds using millisecond timers around the serialization logic.
+
+File Size: 
+Exports are written to temporary files to record exact size on disk, which are deleted immediately afterwards.
