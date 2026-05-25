@@ -28,4 +28,4 @@ services:
       test: ["CMD-SHELL", "pg_isready -U user -d exports_db"]
       interval: 10s
       timeout: 5s
-      retries: 30 
+      retries: 30
