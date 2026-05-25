@@ -1,0 +1,79 @@
+Step 1: Start the Docker Containers
+
+docker-compose up --build -d
+
+
+Step 2: Verify Database Seeding
+
+docker-compose exec db psql -U user -d exports_db -c "SELECT COUNT(*) FROM records;"
+
+
+Step 3: Run the Performance Benchmark
+
+curl -X GET http://localhost:8080/exports/benchmark
+
+
+Step 4: Test Streaming CSV Format (Uncompressed)
+
+Initiate the CSV export job:
+
+# Create the job and capture the UUID response
+curl -X POST http://localhost:8080/exports \
+  -H "Content-Type: application/json" \
+  -d '{"format": "csv", "columns": [{"source": "id", "target": "id"}, {"source": "name", "target": "name"}, {"source": "value", "target": "value"}, {"source": "metadata", "target": "metadata"}]}'
+
+Example JSON Response: {"exportId":"a90df265-5b43-4cb5-827d-080c551ad36e","status":"pending"}
+
+Download the CSV Stream: Replace YOUR_JOB_UUID with the exportId from the response:
+
+# Download the CSV stream to export.csv
+curl -o export.csv http://localhost:8080/exports/YOUR_JOB_UUID/download
+
+
+Step 5: Test Streaming JSON Format (with GZIP compression)
+
+Initiate the Gzipped JSON export job:
+
+curl -X POST http://localhost:8080/exports \
+  -H "Content-Type: application/json" \
+  -d '{"format": "json", "columns": [{"source": "id", "target": "id"}, {"source": "name", "target": "name"}, {"source": "metadata", "target": "metadata"}], "compression": "gzip"}'
+
+(Take note of the returned Job ID)
+
+Download the Compressed JSON Stream: We use --compressed to instruct curl to automatically decompress the GZIP stream as it downloads it:
+
+# Download and decompress the JSON stream directly to export.json
+curl --compressed -o export.json http://localhost:8080/exports/YOUR_JOB_UUID/download
+
+
+Step 6: Test Streaming XML Format (Nested JSONB translation)
+
+Initiate the XML export job:
+
+curl -X POST http://localhost:8080/exports \
+  -H "Content-Type: application/json" \
+  -d '{"format": "xml", "columns": [{"source": "id", "target": "id"}, {"source": "metadata", "target": "metadata"}]}'
+
+Download the XML Stream:
+
+# Download the XML stream to export.xml
+curl -o export.xml http://localhost:8080/exports/YOUR_JOB_UUID/download
+
+(Open export.xml to see how the nested metadata JSONB keys are correctly represented as recursive XML nodes, e.g. <metadata><sku>SKU-1</sku><details><weight>1.5</weight></details></metadata>)
+
+
+Step 7: Test Streaming Apache Parquet Format
+
+Initiate the Parquet export job:
+
+curl -X POST http://localhost:8080/exports \
+  -H "Content-Type: application/json" \
+  -d '{"format": "parquet", "columns": [{"source": "id", "target": "id"}, {"source": "name", "target": "name"}, {"source": "value", "target": "value"}, {"source": "metadata", "target": "metadata"}]}'
+
+Download the binary Parquet file:
+
+# Download the binary Parquet file to export.parquet
+curl -o export.parquet http://localhost:8080/exports/YOUR_JOB_UUID/download
+
+
+docker-compose down -v
