@@ -34,7 +34,7 @@ psql -v ON_ERROR_STOP=1 --username "$DB_USER" --dbname "$DB_NAME" <<-EOSQL
     metadata JSONB NOT NULL
   );
 
-  echo "Inserting 10,000,000 records streamingly..."
+  \echo 'Inserting 10,000,000 records streamingly...'
   -- Insert mock data using generate_series
   INSERT INTO records (id, name, value, metadata, created_at)
   SELECT 
@@ -54,7 +54,7 @@ psql -v ON_ERROR_STOP=1 --username "$DB_USER" --dbname "$DB_NAME" <<-EOSQL
     NOW() - (i || ' seconds')::interval AS created_at
   FROM generate_series(1, 10000000) AS i;
 
-  echo "Creating primary key index..."
+  \echo 'Creating primary key index...'
   -- Add primary key constraint (this will build the B-Tree index in one pass)
   ALTER TABLE records ADD PRIMARY KEY (id);
 
@@ -64,7 +64,7 @@ psql -v ON_ERROR_STOP=1 --username "$DB_USER" --dbname "$DB_NAME" <<-EOSQL
   ALTER SEQUENCE records_id_seq OWNED BY records.id;
   SELECT setval('records_id_seq', 10000000);
 
-  echo "Setting table to LOGGED..."
+  \echo 'Setting table to LOGGED...'
   -- Convert to logged table
   ALTER TABLE records SET LOGGED;
 EOSQL
