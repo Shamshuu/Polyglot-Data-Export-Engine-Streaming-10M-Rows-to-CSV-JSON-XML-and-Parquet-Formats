@@ -78,6 +78,7 @@ public class ExportService {
             if ("parquet".equals(job.getFormat())) {
                 // Parquet must be written to a seekable file on disk first
                 File tempFile = File.createTempFile("export_" + job.getExportId(), ".parquet");
+                tempFile.delete(); // Hadoop's ParquetWriter expects the file to not exist yet
                 try {
                     writeParquetToDisk(job, tempFile);
                     // Now stream the file to the client in small buffers
@@ -352,7 +353,7 @@ public class ExportService {
                             .withConf(conf)
                             .withRowGroupSize(1 * 1024 * 1024) // 1MB row group size keeps memory low
                             .withPageSize(64 * 1024)           // 64KB page size
-                            .withCompressionCodec(CompressionCodecName.SNAPPY)
+                            .withCompressionCodec(CompressionCodecName.GZIP)
                             .build()) {
                         
                         while (rs.next()) {
@@ -440,6 +441,7 @@ public class ExportService {
             ExportJob job = new ExportJob(dummyId, format, columns, null, "running");
             
             File tempFile = File.createTempFile("benchmark_" + format, "." + format);
+            tempFile.delete(); // Delete so that ParquetWriter or OutputStreams can create it fresh
             tempFile.deleteOnExit();
 
             long startTime = System.currentTimeMillis();
